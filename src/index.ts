@@ -41,7 +41,7 @@ async function main() {
     web3.AddressLookupTableProgram.createLookupTable({
       authority: user.publicKey,
       payer: user.publicKey,
-      recentSlot: slot,
+      recentSlot: slot - 200,
     })
 
   console.log("lookup table address:", lookupTableAddress.toBase58())
@@ -64,11 +64,23 @@ async function main() {
   await connection.confirmTransaction(txid)
   console.log(`https://explorer.solana.com/tx/${txid}?cluster=devnet`)
 
+  await new Promise((resolve) => setTimeout(resolve, 5000))
+
   const extendInstruction = web3.AddressLookupTableProgram.extendLookupTable({
     payer: user.publicKey,
     authority: user.publicKey,
     lookupTable: lookupTableAddress,
-    addresses: [user.publicKey],
+    addresses: [
+      web3.Keypair.generate().publicKey,
+      web3.Keypair.generate().publicKey,
+      web3.Keypair.generate().publicKey,
+      web3.Keypair.generate().publicKey,
+      web3.Keypair.generate().publicKey,
+      web3.Keypair.generate().publicKey,
+      web3.Keypair.generate().publicKey,
+      web3.Keypair.generate().publicKey,
+      web3.Keypair.generate().publicKey,
+    ],
   })
 
   const instructions2 = [extendInstruction]
@@ -84,7 +96,27 @@ async function main() {
   transaction2.sign([user])
 
   const txid2 = await connection.sendTransaction(transaction2)
+  await connection.confirmTransaction(txid2)
   console.log(`https://explorer.solana.com/tx/${txid2}?cluster=devnet`)
+
+  await new Promise((resolve) => setTimeout(resolve, 5000))
+
+  // define the `PublicKey` of the lookup table to fetch
+  // const lookupTableAddress = new web3.PublicKey("")
+
+  // get the table from the cluster
+  const lookupTableAccount = await connection
+    .getAddressLookupTable(lookupTableAddress)
+    .then((res) => res.value)
+
+  // `lookupTableAccount` will now be a `AddressLookupTableAccount` object
+
+  console.log("Table address from cluster:", lookupTableAccount!.key.toBase58())
+
+  console.log(lookupTableAccount)
+  for (let i = 0; i < lookupTableAccount!.state.addresses.length; i++) {
+    console.log(i, lookupTableAccount!.state.addresses[i].toBase58())
+  }
 }
 
 main()
