@@ -1,5 +1,6 @@
 import { initializeKeypair } from "./initializeKeypair"
 import * as web3 from "@solana/web3.js"
+import { transferInstructionData } from "@solana/spl-token"
 
 async function main() {
   const connection = new web3.Connection(web3.clusterApiUrl("devnet"))
@@ -7,99 +8,101 @@ async function main() {
 
   console.log("PublicKey:", user.publicKey.toBase58())
 
-  let minRent = await connection.getMinimumBalanceForRentExemption(0)
-  let blockhash = await connection
-    .getLatestBlockhash()
-    .then((res) => res.blockhash)
+  const addresses = []
+  for (let i = 0; i < 30; i++) {
+    addresses.push(web3.Keypair.generate().publicKey)
+  }
 
-  // const instructions = [
-  // web3.SystemProgram.transfer({
-  //   fromPubkey: user.publicKey,
-  //   toPubkey: new web3.PublicKey(
-  //     "Gqu7KLHnkdMrtfAN8TqQGU4o1PvXA2X4VTNkF4ok4t78"
-  //   ),
-  //   lamports: minRent,
-  // }),
-  // ]
+  const [lookupTableInst, lookupTableAddress] = await createLookupTable(
+    user,
+    connection
+  )
 
-  // const messageV0 = new web3.TransactionMessage({
-  //   payerKey: user.publicKey,
-  //   recentBlockhash: blockhash,
-  //   instructions,
-  // }).compileToV0Message()
+  const extendInstruction = await extendLookupTable(
+    user,
+    lookupTableAddress,
+    addresses
+  )
 
-  // const transaction = new web3.VersionedTransaction(messageV0)
+  const instructions = [lookupTableInst, extendInstruction]
+  await sendTransaction(connection, user, instructions)
 
-  // transaction.sign([user])
+  await new Promise((resolve) => setTimeout(resolve, 5000))
 
-  // const txid = await connection.sendTransaction(transaction)
-  // console.log(`https://explorer.solana.com/tx/${txid}?cluster=devnet`)
+  const addresses2 = []
+  for (let i = 0; i < 27; i++) {
+    addresses2.push(web3.Keypair.generate().publicKey)
+  }
 
+  const extendInstruction2 = await extendLookupTable(
+    user,
+    lookupTableAddress,
+    addresses2
+  )
+
+  const instruction2 = [extendInstruction2]
+  await sendTransaction(connection, user, instruction2)
+
+  await new Promise((resolve) => setTimeout(resolve, 5000))
+
+  const lookupTableAccount = await connection
+    .getAddressLookupTable(lookupTableAddress)
+    .then((res) => res.value)
+
+  if (lookupTableAccount) {
+    const transferInstructions = await createTransferInstructions(
+      connection,
+      lookupTableAccount,
+      user
+    )
+
+    await sendTransaction(connection, user, transferInstructions, [
+      lookupTableAccount,
+    ])
+  }
+}
+
+async function createLookupTable(
+  user: web3.Keypair,
+  connection: web3.Connection
+): Promise<[web3.TransactionInstruction, web3.PublicKey]> {
   const slot = await connection.getSlot()
-
   const [lookupTableInst, lookupTableAddress] =
     web3.AddressLookupTableProgram.createLookupTable({
       authority: user.publicKey,
       payer: user.publicKey,
-      recentSlot: slot - 200,
+      recentSlot: slot - 10,
     })
-
   console.log("lookup table address:", lookupTableAddress.toBase58())
+  return [lookupTableInst, lookupTableAddress]
+}
 
-  const addresses = []
-  for (let i = 0; i < 25; i++) {
-    addresses.push(web3.Keypair.generate().publicKey)
-  }
-
+async function extendLookupTable(
+  user: web3.Keypair,
+  lookupTableAddress: web3.PublicKey,
+  addresses: web3.PublicKey[]
+): Promise<web3.TransactionInstruction> {
   const extendInstruction = web3.AddressLookupTableProgram.extendLookupTable({
     payer: user.publicKey,
     authority: user.publicKey,
     lookupTable: lookupTableAddress,
     addresses: addresses,
   })
+  return extendInstruction
+}
 
-  const instructions = [lookupTableInst, extendInstruction]
+async function createTransferInstructions(
+  connection: web3.Connection,
+  lookupTableAccount: web3.AddressLookupTableAccount,
+  user: web3.Keypair
+) {
+  const { addresses } = lookupTableAccount.state
 
-  // create v0 compatible message
-  const messageV0 = new web3.TransactionMessage({
-    payerKey: user.publicKey,
-    recentBlockhash: blockhash,
-    instructions,
-  }).compileToV0Message()
-
-  const transaction = new web3.VersionedTransaction(messageV0)
-
-  // sign your transaction with the required `Signers`
-  transaction.sign([user])
-
-  const txid = await connection.sendTransaction(transaction)
-  await connection.confirmTransaction(txid)
-  console.log(`https://explorer.solana.com/tx/${txid}?cluster=devnet`)
-
-  await new Promise((resolve) => setTimeout(resolve, 7000))
-
-  // define the `PublicKey` of the lookup table to fetch
-  // const lookupTableAddress = new web3.PublicKey("")
-
-  // get the table from the cluster
-  const lookupTableAccount = await connection
-    .getAddressLookupTable(lookupTableAddress)
-    .then((res) => res.value)
-
-  // `lookupTableAccount` will now be a `AddressLookupTableAccount` object
-
-  console.log("Table address from cluster:", lookupTableAccount!.key.toBase58())
-
-  console.log(lookupTableAccount)
-  for (let i = 0; i < lookupTableAccount!.state.addresses.length; i++) {
-    console.log(i, lookupTableAccount!.state.addresses[i].toBase58())
-  }
-
-  await new Promise((resolve) => setTimeout(resolve, 5000))
+  let minRent = await connection.getMinimumBalanceForRentExemption(0)
 
   const transferInstructions = []
 
-  for (let i = 0; i < 25; i++) {
+  for (let i = 0; i < addresses.length; i++) {
     transferInstructions.push(
       web3.SystemProgram.transfer({
         fromPubkey: user.publicKey,
@@ -109,23 +112,37 @@ async function main() {
     )
   }
 
-  let blockhash2 = await connection
-    .getLatestBlockhash()
-    .then((res) => res.blockhash)
+  return transferInstructions
+}
 
-  const messageV03 = new web3.TransactionMessage({
+async function sendTransaction(
+  connection: web3.Connection,
+  user: web3.Keypair,
+  instructions: web3.TransactionInstruction[],
+  lookupTableAccounts?: web3.AddressLookupTableAccount[]
+) {
+  const { lastValidBlockHeight, blockhash } =
+    await connection.getLatestBlockhash()
+
+  const messageV0 = new web3.TransactionMessage({
     payerKey: user.publicKey,
-    recentBlockhash: blockhash2,
-    instructions: transferInstructions,
-  }).compileToV0Message([lookupTableAccount!])
+    recentBlockhash: blockhash,
+    instructions,
+  }).compileToV0Message(lookupTableAccounts ? lookupTableAccounts : undefined)
 
-  const transaction3 = new web3.VersionedTransaction(messageV03)
+  const transaction = new web3.VersionedTransaction(messageV0)
 
-  transaction3.sign([user])
+  transaction.sign([user])
 
-  const txid3 = await connection.sendTransaction(transaction3)
-  await connection.confirmTransaction(txid3)
-  console.log(`https://explorer.solana.com/tx/${txid3}?cluster=devnet`)
+  const txid = await connection.sendTransaction(transaction)
+
+  await connection.confirmTransaction({
+    blockhash: blockhash,
+    lastValidBlockHeight: lastValidBlockHeight,
+    signature: txid,
+  })
+
+  console.log(`https://explorer.solana.com/tx/${txid}?cluster=devnet`)
 }
 
 main()
