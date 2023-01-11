@@ -34,6 +34,9 @@ async function main() {
     extendInstruction,
   ])
 
+  // Wait 2 seconds
+  await new Promise((resolve) => setTimeout(resolve, 2000))
+
   // Get the lookup table account
   const lookupTableAccount = await getAddressLookupTableHelper(
     connection,
@@ -41,19 +44,17 @@ async function main() {
   )
 
   // If the lookup table account exists, create transfer instructions and send a transaction
-  if (lookupTableAccount) {
-    // Create transfer instructions for each address in the lookup table
-    const transferInstructions = await createTransferInstructionsHelper(
-      connection,
-      lookupTableAccount,
-      user
-    )
+  // Create transfer instructions for each address in the lookup table
+  const transferInstructions = await createTransferInstructionsHelper(
+    connection,
+    lookupTableAccount,
+    user
+  )
 
-    // Send a transaction with the transfer instructions and the lookup table account
-    await sendV0TransactionHelper(connection, user, transferInstructions, [
-      lookupTableAccount,
-    ])
-  }
+  // Send a transaction with the transfer instructions and the lookup table account
+  await sendV0TransactionHelper(connection, user, transferInstructions, [
+    lookupTableAccount,
+  ])
 }
 
 async function createLookupTableHelper(
@@ -69,7 +70,7 @@ async function createLookupTableHelper(
     web3.AddressLookupTableProgram.createLookupTable({
       authority: user.publicKey, // The authority (i.e., the account with permission to modify the lookup table)
       payer: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
-      recentSlot: slot - 5, // The recent slot to derive lookup table's address
+      recentSlot: slot - 10, // The recent slot to derive lookup table's address
     })
   console.log("lookup table address:", lookupTableAddress.toBase58())
   return [lookupTableInst, lookupTableAddress]
@@ -94,17 +95,19 @@ async function getAddressLookupTableHelper(
   connection: web3.Connection,
   lookupTableAddress: web3.PublicKey
 ): Promise<web3.AddressLookupTableAccount> {
-  let lookupTableAccount
+  let lookupTableAccount // Initialize an empty variable to store the lookup table account
   while (!lookupTableAccount) {
+    // Keep running this loop until a lookup table account is found
     try {
+      // Try to fetch the lookup table account using the lookupTableAddress
       lookupTableAccount = (
         await connection.getAddressLookupTable(lookupTableAddress)
       ).value
     } catch (err) {
-      console.log(`Retrying: ${err}`)
+      console.log(err)
     }
   }
-  return lookupTableAccount
+  return lookupTableAccount // Return the lookup table account when it is successfully fetched
 }
 
 async function createTransferInstructionsHelper(
