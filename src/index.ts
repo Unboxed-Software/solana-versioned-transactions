@@ -16,59 +16,47 @@ async function main() {
   }
 
   // Create an instruction to creating a lookup table and the address of the lookup table
-  const [lookupTableInst, lookupTableAddress] = await createLookupTable(
+  const [lookupTableInst, lookupTableAddress] = await createLookupTableHelper(
     user,
     connection
   )
 
   // Create an "extend" instruction to add the addresses to the lookup table
-  const extendInstruction = await extendLookupTable(
+  const extendInstruction = await extendLookupTableHelper(
     user,
     lookupTableAddress,
     addresses
   )
 
   // Send the transaction with the create lookup table and extend instructions
-  await sendTransaction(connection, user, [lookupTableInst, extendInstruction])
-
-  // Generate 27 more addresses
-  const moreAddresses = []
-  for (let i = 0; i < 27; i++) {
-    moreAddresses.push(web3.Keypair.generate().publicKey)
-  }
-
-  // Create another "extend" instruction to add the additional addresses to the lookup table
-  const extendInstruction2 = await extendLookupTable(
-    user,
-    lookupTableAddress,
-    moreAddresses
-  )
-
-  // Send the transaction with the second extend instruction
-  await sendTransaction(connection, user, [extendInstruction2])
+  await sendV0TransactionHelper(connection, user, [
+    lookupTableInst,
+    extendInstruction,
+  ])
 
   // Get the lookup table account
-  const lookupTableAccount = await connection
-    .getAddressLookupTable(lookupTableAddress)
-    .then((res) => res.value)
+  const lookupTableAccount = await getAddressLookupTableHelper(
+    connection,
+    lookupTableAddress
+  )
 
   // If the lookup table account exists, create transfer instructions and send a transaction
   if (lookupTableAccount) {
     // Create transfer instructions for each address in the lookup table
-    const transferInstructions = await createTransferInstructions(
+    const transferInstructions = await createTransferInstructionsHelper(
       connection,
       lookupTableAccount,
       user
     )
 
     // Send a transaction with the transfer instructions and the lookup table account
-    await sendTransaction(connection, user, transferInstructions, [
+    await sendV0TransactionHelper(connection, user, transferInstructions, [
       lookupTableAccount,
     ])
   }
 }
 
-async function createLookupTable(
+async function createLookupTableHelper(
   user: web3.Keypair,
   connection: web3.Connection
 ): Promise<[web3.TransactionInstruction, web3.PublicKey]> {
@@ -81,13 +69,13 @@ async function createLookupTable(
     web3.AddressLookupTableProgram.createLookupTable({
       authority: user.publicKey, // The authority (i.e., the account with permission to modify the lookup table)
       payer: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
-      recentSlot: slot - 10, // The recent slot to derive lookup table's address
+      recentSlot: slot - 5, // The recent slot to derive lookup table's address
     })
   console.log("lookup table address:", lookupTableAddress.toBase58())
   return [lookupTableInst, lookupTableAddress]
 }
 
-async function extendLookupTable(
+async function extendLookupTableHelper(
   user: web3.Keypair,
   lookupTableAddress: web3.PublicKey,
   addresses: web3.PublicKey[]
@@ -102,7 +90,24 @@ async function extendLookupTable(
   return extendInstruction
 }
 
-async function createTransferInstructions(
+async function getAddressLookupTableHelper(
+  connection: web3.Connection,
+  lookupTableAddress: web3.PublicKey
+): Promise<web3.AddressLookupTableAccount> {
+  let lookupTableAccount
+  while (!lookupTableAccount) {
+    try {
+      lookupTableAccount = (
+        await connection.getAddressLookupTable(lookupTableAddress)
+      ).value
+    } catch (err) {
+      console.log(`Retrying: ${err}`)
+    }
+  }
+  return lookupTableAccount
+}
+
+async function createTransferInstructionsHelper(
   connection: web3.Connection,
   lookupTableAccount: web3.AddressLookupTableAccount,
   user: web3.Keypair
@@ -129,7 +134,7 @@ async function createTransferInstructions(
   return transferInstructions
 }
 
-async function sendTransaction(
+async function sendV0TransactionHelper(
   connection: web3.Connection,
   user: web3.Keypair,
   instructions: web3.TransactionInstruction[],
@@ -164,9 +169,6 @@ async function sendTransaction(
 
   // Log the transaction URL on the Solana Explorer
   console.log(`https://explorer.solana.com/tx/${txid}?cluster=devnet`)
-
-  // Wait 5 seconds
-  await new Promise((resolve) => setTimeout(resolve, 5000))
 }
 
 main()
