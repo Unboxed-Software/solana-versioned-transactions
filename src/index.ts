@@ -107,7 +107,8 @@ async function getAddressLookupTableHelper(
       console.log(err)
     }
   }
-  return lookupTableAccount // Return the lookup table account when it is successfully fetched
+  // Return the lookup table account when it is successfully fetched
+  return lookupTableAccount
 }
 
 async function createTransferInstructionsHelper(
