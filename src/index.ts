@@ -34,8 +34,27 @@ async function main() {
     extendInstruction,
   ])
 
-  // Wait 2 seconds
-  await new Promise((resolve) => setTimeout(resolve, 2000))
+  // Wait for lookup table to activate
+  await checkForNewBlock(connection, 1)
+
+  // Generate 27 addresses
+  const moreAddresses = []
+  for (let i = 0; i < 27; i++) {
+    moreAddresses.push(web3.Keypair.generate().publicKey)
+  }
+
+  // Create an "extend" instruction to add the addresses to the lookup table
+  const anotherExtendInstruction = await extendLookupTableHelper(
+    user,
+    lookupTableAddress,
+    moreAddresses
+  )
+
+  // Send the transaction with the create lookup table and extend instructions
+  await sendV0TransactionHelper(connection, user, [anotherExtendInstruction])
+
+  // Wait for lookup table to activate
+  await checkForNewBlock(connection, 1)
 
   // Get the lookup table account
   const lookupTableAccount = await getAddressLookupTableHelper(
@@ -55,6 +74,28 @@ async function main() {
   await sendV0TransactionHelper(connection, user, transferInstructions, [
     lookupTableAccount,
   ])
+
+  // Create a deactivate instruction for the lookup table
+  const deactivateInstruction = await deactivateLookupTableHelper(
+    user.publicKey, // The lookup table authority
+    lookupTableAddress // The address of the lookup table to deactivate
+  )
+
+  // Send the deactivate instruction as a transaction
+  await sendV0TransactionHelper(connection, user, [deactivateInstruction])
+
+  // Wait for lookup table to finish deactivating, 513 blocks
+  await checkForNewBlock(connection, 513)
+
+  // Create a close instruction for the lookup table
+  const closeInstruction = await closeLookupTableHelper(
+    user.publicKey, // The lookup table authority
+    lookupTableAddress, // The address of the lookup table to close
+    user.publicKey // The recipient of closed account lamports
+  )
+
+  // Send the close instruction as a transaction
+  await sendV0TransactionHelper(connection, user, [closeInstruction])
 }
 
 async function createLookupTableHelper(
@@ -95,20 +136,16 @@ async function getAddressLookupTableHelper(
   connection: web3.Connection,
   lookupTableAddress: web3.PublicKey
 ): Promise<web3.AddressLookupTableAccount> {
-  let lookupTableAccount // Initialize an empty variable to store the lookup table account
-  while (!lookupTableAccount) {
-    // Keep running this loop until a lookup table account is found
-    try {
-      // Try to fetch the lookup table account using the lookupTableAddress
-      lookupTableAccount = (
-        await connection.getAddressLookupTable(lookupTableAddress)
-      ).value
-    } catch (err) {
-      console.log(err)
-    }
+  const lookupTableAccount = (
+    await connection.getAddressLookupTable(lookupTableAddress)
+  ).value
+
+  // Return the lookup table account if it is successfully fetched
+  if (lookupTableAccount === null) {
+    throw new Error("lookupTableAccount not found")
+  } else {
+    return lookupTableAccount
   }
-  // Return the lookup table account when it is successfully fetched
-  return lookupTableAccount
 }
 
 async function createTransferInstructionsHelper(
@@ -165,14 +202,67 @@ async function sendV0TransactionHelper(
   const txid = await connection.sendTransaction(transaction)
 
   // Confirm the transaction
-  await connection.confirmTransaction({
-    blockhash: blockhash,
-    lastValidBlockHeight: lastValidBlockHeight,
-    signature: txid,
-  })
+  await connection.confirmTransaction(
+    {
+      blockhash: blockhash,
+      lastValidBlockHeight: lastValidBlockHeight,
+      signature: txid,
+    },
+    "finalized"
+  )
 
   // Log the transaction URL on the Solana Explorer
   console.log(`https://explorer.solana.com/tx/${txid}?cluster=devnet`)
+}
+
+async function deactivateLookupTableHelper(
+  authority: web3.PublicKey,
+  lookupTableAddress: web3.PublicKey
+): Promise<web3.TransactionInstruction> {
+  // Create a transaction instruction to deactivate a lookup table
+  const deactivateInstruction =
+    web3.AddressLookupTableProgram.deactivateLookupTable({
+      authority: authority, // The authority (i.e., the account with permission to modify the lookup table)
+      lookupTable: lookupTableAddress, // The address of the lookup table to deactivate
+    })
+  return deactivateInstruction
+}
+
+async function closeLookupTableHelper(
+  authority: web3.PublicKey,
+  lookupTableAddress: web3.PublicKey,
+  recipient: web3.PublicKey
+): Promise<web3.TransactionInstruction> {
+  // Create a transaction instruction to close a lookup table
+  const closeInstruction = web3.AddressLookupTableProgram.closeLookupTable({
+    authority: authority, // The authority (i.e., the account with permission to modify the lookup table)
+    lookupTable: lookupTableAddress, // The address of the lookup table to close
+    recipient: recipient, // The recipient of closed account lamports
+  })
+  return closeInstruction
+}
+
+function checkForNewBlock(connection: web3.Connection, targetHeight: number) {
+  console.log(`Waiting for ${targetHeight} new blocks`)
+  return new Promise(async (resolve: any) => {
+    // Get the last valid block height of the blockchain
+    const { lastValidBlockHeight } = await connection.getLatestBlockhash()
+
+    // Set an interval to check for new blocks every 1000ms
+    const intervalId = setInterval(async () => {
+      // Get the new valid block height
+      const { lastValidBlockHeight: newValidBlockHeight } =
+        await connection.getLatestBlockhash()
+      // console.log(newValidBlockHeight)
+
+      // Check if the new valid block height is greater than the target block height
+      if (newValidBlockHeight > lastValidBlockHeight + targetHeight) {
+        // If the target block height is reached, clear the interval and resolve the promise
+        clearInterval(intervalId)
+        resolve()
+      }
+    }, 1000)
+  })
 }
 
 main()
