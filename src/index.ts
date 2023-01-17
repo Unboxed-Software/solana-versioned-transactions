@@ -111,7 +111,7 @@ async function createLookupTableHelper(
     web3.AddressLookupTableProgram.createLookupTable({
       authority: user.publicKey, // The authority (i.e., the account with permission to modify the lookup table)
       payer: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
-      recentSlot: slot - 10, // The recent slot to derive lookup table's address
+      recentSlot: slot - 1, // The recent slot to derive lookup table's address
     })
   console.log("lookup table address:", lookupTableAddress.toBase58())
   return [lookupTableInst, lookupTableAddress]
@@ -130,6 +130,69 @@ async function extendLookupTableHelper(
     addresses: addresses, // The addresses to add to the lookup table
   })
   return extendInstruction
+}
+
+async function sendV0TransactionHelper(
+  connection: web3.Connection,
+  user: web3.Keypair,
+  instructions: web3.TransactionInstruction[],
+  lookupTableAccounts?: web3.AddressLookupTableAccount[]
+) {
+  // Get the latest blockhash and last valid block height
+  const { lastValidBlockHeight, blockhash } =
+    await connection.getLatestBlockhash()
+
+  // Create a new transaction message with the provided instructions
+  const messageV0 = new web3.TransactionMessage({
+    payerKey: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
+    recentBlockhash: blockhash, // The blockhash of the most recent block
+    instructions, // The instructions to include in the transaction
+  }).compileToV0Message(lookupTableAccounts ? lookupTableAccounts : undefined)
+
+  // Create a new transaction object with the message
+  const transaction = new web3.VersionedTransaction(messageV0)
+
+  // Sign the transaction with the user's keypair
+  transaction.sign([user])
+
+  // Send the transaction to the cluster
+  const txid = await connection.sendTransaction(transaction)
+
+  // Confirm the transaction
+  await connection.confirmTransaction(
+    {
+      blockhash: blockhash,
+      lastValidBlockHeight: lastValidBlockHeight,
+      signature: txid,
+    },
+    "finalized"
+  )
+
+  // Log the transaction URL on the Solana Explorer
+  console.log(`https://explorer.solana.com/tx/${txid}?cluster=devnet`)
+}
+
+function checkForNewBlock(connection: web3.Connection, targetHeight: number) {
+  console.log(`Waiting for ${targetHeight} new blocks`)
+  return new Promise(async (resolve: any) => {
+    // Get the last valid block height of the blockchain
+    const { lastValidBlockHeight } = await connection.getLatestBlockhash()
+
+    // Set an interval to check for new blocks every 1000ms
+    const intervalId = setInterval(async () => {
+      // Get the new valid block height
+      const { lastValidBlockHeight: newValidBlockHeight } =
+        await connection.getLatestBlockhash()
+      // console.log(newValidBlockHeight)
+
+      // Check if the new valid block height is greater than the target block height
+      if (newValidBlockHeight > lastValidBlockHeight + targetHeight) {
+        // If the target block height is reached, clear the interval and resolve the promise
+        clearInterval(intervalId)
+        resolve()
+      }
+    }, 1000)
+  })
 }
 
 async function getAddressLookupTableHelper(
@@ -175,46 +238,6 @@ async function createTransferInstructionsHelper(
   return transferInstructions
 }
 
-async function sendV0TransactionHelper(
-  connection: web3.Connection,
-  user: web3.Keypair,
-  instructions: web3.TransactionInstruction[],
-  lookupTableAccounts?: web3.AddressLookupTableAccount[]
-) {
-  // Get the latest blockhash and last valid block height
-  const { lastValidBlockHeight, blockhash } =
-    await connection.getLatestBlockhash()
-
-  // Create a new transaction message with the provided instructions
-  const messageV0 = new web3.TransactionMessage({
-    payerKey: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
-    recentBlockhash: blockhash, // The blockhash of the most recent block
-    instructions, // The instructions to include in the transaction
-  }).compileToV0Message(lookupTableAccounts ? lookupTableAccounts : undefined)
-
-  // Create a new transaction object with the message
-  const transaction = new web3.VersionedTransaction(messageV0)
-
-  // Sign the transaction with the user's keypair
-  transaction.sign([user])
-
-  // Send the transaction to the cluster
-  const txid = await connection.sendTransaction(transaction)
-
-  // Confirm the transaction
-  await connection.confirmTransaction(
-    {
-      blockhash: blockhash,
-      lastValidBlockHeight: lastValidBlockHeight,
-      signature: txid,
-    },
-    "finalized"
-  )
-
-  // Log the transaction URL on the Solana Explorer
-  console.log(`https://explorer.solana.com/tx/${txid}?cluster=devnet`)
-}
-
 async function deactivateLookupTableHelper(
   authority: web3.PublicKey,
   lookupTableAddress: web3.PublicKey
@@ -242,27 +265,16 @@ async function closeLookupTableHelper(
   return closeInstruction
 }
 
-function checkForNewBlock(connection: web3.Connection, targetHeight: number) {
-  console.log(`Waiting for ${targetHeight} new blocks`)
-  return new Promise(async (resolve: any) => {
-    // Get the last valid block height of the blockchain
-    const { lastValidBlockHeight } = await connection.getLatestBlockhash()
-
-    // Set an interval to check for new blocks every 1000ms
-    const intervalId = setInterval(async () => {
-      // Get the new valid block height
-      const { lastValidBlockHeight: newValidBlockHeight } =
-        await connection.getLatestBlockhash()
-      // console.log(newValidBlockHeight)
-
-      // Check if the new valid block height is greater than the target block height
-      if (newValidBlockHeight > lastValidBlockHeight + targetHeight) {
-        // If the target block height is reached, clear the interval and resolve the promise
-        clearInterval(intervalId)
-        resolve()
-      }
-    }, 1000)
+async function freezeLookupTableHelper(
+  authority: web3.PublicKey,
+  lookupTableAddress: web3.PublicKey
+): Promise<web3.TransactionInstruction> {
+  // Create a transaction instruction to freeze a lookup table
+  const freezeInstruction = web3.AddressLookupTableProgram.freezeLookupTable({
+    authority: authority, // The authority (i.e., the account with permission to modify the lookup table)
+    lookupTable: lookupTableAddress, // The address of the lookup table to freeze
   })
+  return freezeInstruction
 }
 
 main()
