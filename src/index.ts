@@ -9,69 +9,37 @@ async function main() {
   const user = await initializeKeypair(connection)
   console.log("PublicKey:", user.publicKey.toBase58())
 
-  // Generate 30 addresses
-  const addresses = []
-  for (let i = 0; i < 30; i++) {
-    addresses.push(web3.Keypair.generate().publicKey)
+  // Generate 57 addresses
+  const recipients = []
+  for (let i = 0; i < 57; i++) {
+    recipients.push(web3.Keypair.generate().publicKey)
   }
 
-  // Create an instruction to creating a lookup table and the address of the lookup table
-  const [lookupTableInst, lookupTableAddress] = await createLookupTableHelper(
+  const lookupTableAddress = await initializeLookupTable(
     user,
-    connection
+    connection,
+    recipients
   )
 
-  // Create an "extend" instruction to add the addresses to the lookup table
-  const extendInstruction = await extendLookupTableHelper(
-    user,
-    lookupTableAddress,
-    addresses
-  )
+  await waitForNewBlock(connection, 1)
 
-  // Send the transaction with the create lookup table and extend instructions
-  await sendV0TransactionHelper(connection, user, [
-    lookupTableInst,
-    extendInstruction,
-  ])
+  const lookupTableAccount = (
+    await connection.getAddressLookupTable(lookupTableAddress)
+  ).value
 
-  // Wait for lookup table to activate
-  await checkForNewBlock(connection, 1)
-
-  // Generate 27 addresses
-  const moreAddresses = []
-  for (let i = 0; i < 27; i++) {
-    moreAddresses.push(web3.Keypair.generate().publicKey)
+  if (!lookupTableAccount) {
+    throw new Error("Lookup table not found")
   }
 
-  // Create an "extend" instruction to add the addresses to the lookup table
-  const anotherExtendInstruction = await extendLookupTableHelper(
-    user,
-    lookupTableAddress,
-    moreAddresses
-  )
+  const transferInstructions = recipients.map((recipient) => {
+    return web3.SystemProgram.transfer({
+      fromPubkey: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
+      toPubkey: recipient, // The destination account for the transfer
+      lamports: web3.LAMPORTS_PER_SOL * 0.01, // The amount of lamports to transfer
+    })
+  })
 
-  // Send the transaction with the create lookup table and extend instructions
-  await sendV0TransactionHelper(connection, user, [anotherExtendInstruction])
-
-  // Wait for lookup table to activate
-  await checkForNewBlock(connection, 1)
-
-  // Get the lookup table account
-  const lookupTableAccount = await getAddressLookupTableHelper(
-    connection,
-    lookupTableAddress
-  )
-
-  // If the lookup table account exists, create transfer instructions and send a transaction
-  // Create transfer instructions for each address in the lookup table
-  const transferInstructions = await createTransferInstructionsHelper(
-    connection,
-    lookupTableAccount,
-    user
-  )
-
-  // Send a transaction with the transfer instructions and the lookup table account
-  await sendV0TransactionHelper(connection, user, transferInstructions, [
+  await sendV0Transaction(connection, user, transferInstructions, [
     lookupTableAccount,
   ])
 
@@ -82,10 +50,9 @@ async function main() {
   )
 
   // Send the deactivate instruction as a transaction
-  await sendV0TransactionHelper(connection, user, [deactivateInstruction])
+  await sendV0Transaction(connection, user, [deactivateInstruction])
 
-  // Wait for lookup table to finish deactivating, 513 blocks
-  await checkForNewBlock(connection, 513)
+  await waitForNewBlock(connection, 513)
 
   // Create a close instruction for the lookup table
   const closeInstruction = await closeLookupTableHelper(
@@ -95,17 +62,18 @@ async function main() {
   )
 
   // Send the close instruction as a transaction
-  await sendV0TransactionHelper(connection, user, [closeInstruction])
+  await sendV0Transaction(connection, user, [closeInstruction])
 }
 
-async function createLookupTableHelper(
+async function initializeLookupTable(
   user: web3.Keypair,
-  connection: web3.Connection
-): Promise<[web3.TransactionInstruction, web3.PublicKey]> {
+  connection: web3.Connection,
+  addresses: web3.PublicKey[]
+): Promise<web3.PublicKey> {
   // Get the current slot
   const slot = await connection.getSlot()
 
-  // Create a transaction instruction for creating a lookup table
+  // Create an instruction for creating a lookup table
   // and retrieve the address of the new lookup table
   const [lookupTableInst, lookupTableAddress] =
     web3.AddressLookupTableProgram.createLookupTable({
@@ -114,25 +82,39 @@ async function createLookupTableHelper(
       recentSlot: slot - 1, // The recent slot to derive lookup table's address
     })
   console.log("lookup table address:", lookupTableAddress.toBase58())
-  return [lookupTableInst, lookupTableAddress]
-}
 
-async function extendLookupTableHelper(
-  user: web3.Keypair,
-  lookupTableAddress: web3.PublicKey,
-  addresses: web3.PublicKey[]
-): Promise<web3.TransactionInstruction> {
-  // Create a transaction instruction to extend a lookup table with the provided addresses
+  // Create an instruction to extend a lookup table with the provided addresses
   const extendInstruction = web3.AddressLookupTableProgram.extendLookupTable({
     payer: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
     authority: user.publicKey, // The authority (i.e., the account with permission to modify the lookup table)
     lookupTable: lookupTableAddress, // The address of the lookup table to extend
-    addresses: addresses, // The addresses to add to the lookup table
+    addresses: addresses.slice(0, 30), // The addresses to add to the lookup table
   })
-  return extendInstruction
+
+  await sendV0Transaction(connection, user, [
+    lookupTableInst,
+    extendInstruction,
+  ])
+
+  var remaining = addresses.slice(30)
+
+  while (remaining.length > 0) {
+    const toAdd = remaining.slice(0, 30)
+    remaining = remaining.slice(30)
+    const extendInstruction = web3.AddressLookupTableProgram.extendLookupTable({
+      payer: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
+      authority: user.publicKey, // The authority (i.e., the account with permission to modify the lookup table)
+      lookupTable: lookupTableAddress, // The address of the lookup table to extend
+      addresses: toAdd, // The addresses to add to the lookup table
+    })
+
+    await sendV0Transaction(connection, user, [extendInstruction])
+  }
+
+  return lookupTableAddress
 }
 
-async function sendV0TransactionHelper(
+async function sendV0Transaction(
   connection: web3.Connection,
   user: web3.Keypair,
   instructions: web3.TransactionInstruction[],
@@ -172,7 +154,7 @@ async function sendV0TransactionHelper(
   console.log(`https://explorer.solana.com/tx/${txid}?cluster=devnet`)
 }
 
-function checkForNewBlock(connection: web3.Connection, targetHeight: number) {
+function waitForNewBlock(connection: web3.Connection, targetHeight: number) {
   console.log(`Waiting for ${targetHeight} new blocks`)
   return new Promise(async (resolve: any) => {
     // Get the last valid block height of the blockchain
@@ -193,49 +175,6 @@ function checkForNewBlock(connection: web3.Connection, targetHeight: number) {
       }
     }, 1000)
   })
-}
-
-async function getAddressLookupTableHelper(
-  connection: web3.Connection,
-  lookupTableAddress: web3.PublicKey
-): Promise<web3.AddressLookupTableAccount> {
-  const lookupTableAccount = (
-    await connection.getAddressLookupTable(lookupTableAddress)
-  ).value
-
-  // Return the lookup table account if it is successfully fetched
-  if (lookupTableAccount === null) {
-    throw new Error("lookupTableAccount not found")
-  } else {
-    return lookupTableAccount
-  }
-}
-
-async function createTransferInstructionsHelper(
-  connection: web3.Connection,
-  lookupTableAccount: web3.AddressLookupTableAccount,
-  user: web3.Keypair
-) {
-  // Get the addresses in the lookup table account
-  const { addresses } = lookupTableAccount.state
-
-  // Get the minimum balance required to be exempt from rent
-  const minRent = await connection.getMinimumBalanceForRentExemption(0)
-
-  const transferInstructions = []
-
-  // For each address in the lookup table, create a transfer instruction
-  for (const address of addresses) {
-    transferInstructions.push(
-      web3.SystemProgram.transfer({
-        fromPubkey: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
-        toPubkey: address, // The destination account for the transfer
-        lamports: minRent, // The amount of lamports to transfer
-      })
-    )
-  }
-
-  return transferInstructions
 }
 
 async function deactivateLookupTableHelper(
