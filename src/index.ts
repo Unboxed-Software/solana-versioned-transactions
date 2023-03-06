@@ -10,24 +10,21 @@ async function main() {
   console.log("PublicKey:", user.publicKey.toBase58())
 
   // Generate 22 addresses
-  const addresses = []
+  const recipients = []
   for (let i = 0; i < 22; i++) {
-    addresses.push(web3.Keypair.generate().publicKey)
+    recipients.push(web3.Keypair.generate().publicKey)
   }
-
-  // Get the minimum balance required to be exempt from rent
-  const minRent = await connection.getMinimumBalanceForRentExemption(0)
 
   // Create an array of transfer instructions
   const transferInstructions = []
 
   // Add a transfer instruction for each address
-  for (const address of addresses) {
+  for (const address of recipients) {
     transferInstructions.push(
       web3.SystemProgram.transfer({
         fromPubkey: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
         toPubkey: address, // The destination account for the transfer
-        lamports: minRent, // The amount of lamports to transfer
+        lamports: web3.LAMPORTS_PER_SOL * 0.01, // The amount of lamports to transfer
       })
     )
   }
