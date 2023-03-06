@@ -9,48 +9,151 @@ async function main() {
   const user = await initializeKeypair(connection)
   console.log("PublicKey:", user.publicKey.toBase58())
 
-  // Generate 22 addresses
-  const addresses = []
-  for (let i = 0; i < 22; i++) {
-    addresses.push(web3.Keypair.generate().publicKey)
+  // Generate 57 addresses
+  const recipients = []
+  for (let i = 0; i < 57; i++) {
+    recipients.push(web3.Keypair.generate().publicKey)
   }
 
-  // Get the minimum balance required to be exempt from rent
-  const minRent = await connection.getMinimumBalanceForRentExemption(0)
+  const lookupTableAddress = await initializeLookupTable(
+    user,
+    connection,
+    recipients
+  )
 
-  // Create an array of transfer instructions
-  const transferInstructions = []
+  await waitForNewBlock(connection, 1)
 
-  // Add a transfer instruction for each address
-  for (const address of addresses) {
-    transferInstructions.push(
-      web3.SystemProgram.transfer({
-        fromPubkey: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
-        toPubkey: address, // The destination account for the transfer
-        lamports: minRent, // The amount of lamports to transfer
-      })
-    )
+  const lookupTableAccount = (
+    await connection.getAddressLookupTable(lookupTableAddress)
+  ).value
+
+  if (!lookupTableAccount) {
+    throw new Error("Lookup table not found")
   }
 
-  // Create a transaction and add the transfer instructions
-  const transaction = new web3.Transaction().add(...transferInstructions)
+  const transferInstructions = recipients.map((recipient) => {
+    return web3.SystemProgram.transfer({
+      fromPubkey: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
+      toPubkey: recipient, // The destination account for the transfer
+      lamports: web3.LAMPORTS_PER_SOL * 0.01, // The amount of lamports to transfer
+    })
+  })
 
-  // Send the transaction to the cluster (this will fail in this example if addresses > 21)
-  const txid = await connection.sendTransaction(transaction, [user])
+  await sendV0Transaction(connection, user, transferInstructions, [
+    lookupTableAccount,
+  ])
+}
 
+async function initializeLookupTable(
+  user: web3.Keypair,
+  connection: web3.Connection,
+  addresses: web3.PublicKey[]
+): Promise<web3.PublicKey> {
+  // Get the current slot
+  const slot = await connection.getSlot()
+
+  // Create an instruction for creating a lookup table
+  // and retrieve the address of the new lookup table
+  const [lookupTableInst, lookupTableAddress] =
+    web3.AddressLookupTableProgram.createLookupTable({
+      authority: user.publicKey, // The authority (i.e., the account with permission to modify the lookup table)
+      payer: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
+      recentSlot: slot - 1, // The recent slot to derive lookup table's address
+    })
+  console.log("lookup table address:", lookupTableAddress.toBase58())
+
+  // Create an instruction to extend a lookup table with the provided addresses
+  const extendInstruction = web3.AddressLookupTableProgram.extendLookupTable({
+    payer: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
+    authority: user.publicKey, // The authority (i.e., the account with permission to modify the lookup table)
+    lookupTable: lookupTableAddress, // The address of the lookup table to extend
+    addresses: addresses.slice(0, 30), // The addresses to add to the lookup table
+  })
+
+  await sendV0Transaction(connection, user, [
+    lookupTableInst,
+    extendInstruction,
+  ])
+
+  var remaining = addresses.slice(30)
+
+  while (remaining.length > 0) {
+    const toAdd = remaining.slice(0, 30)
+    remaining = remaining.slice(30)
+    const extendInstruction = web3.AddressLookupTableProgram.extendLookupTable({
+      payer: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
+      authority: user.publicKey, // The authority (i.e., the account with permission to modify the lookup table)
+      lookupTable: lookupTableAddress, // The address of the lookup table to extend
+      addresses: toAdd, // The addresses to add to the lookup table
+    })
+
+    await sendV0Transaction(connection, user, [extendInstruction])
+  }
+
+  return lookupTableAddress
+}
+
+async function sendV0Transaction(
+  connection: web3.Connection,
+  user: web3.Keypair,
+  instructions: web3.TransactionInstruction[],
+  lookupTableAccounts?: web3.AddressLookupTableAccount[]
+) {
   // Get the latest blockhash and last valid block height
   const { lastValidBlockHeight, blockhash } =
     await connection.getLatestBlockhash()
 
+  // Create a new transaction message with the provided instructions
+  const messageV0 = new web3.TransactionMessage({
+    payerKey: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
+    recentBlockhash: blockhash, // The blockhash of the most recent block
+    instructions, // The instructions to include in the transaction
+  }).compileToV0Message(lookupTableAccounts ? lookupTableAccounts : undefined)
+
+  // Create a new transaction object with the message
+  const transaction = new web3.VersionedTransaction(messageV0)
+
+  // Sign the transaction with the user's keypair
+  transaction.sign([user])
+
+  // Send the transaction to the cluster
+  const txid = await connection.sendTransaction(transaction)
+
   // Confirm the transaction
-  await connection.confirmTransaction({
-    blockhash: blockhash,
-    lastValidBlockHeight: lastValidBlockHeight,
-    signature: txid,
-  })
+  await connection.confirmTransaction(
+    {
+      blockhash: blockhash,
+      lastValidBlockHeight: lastValidBlockHeight,
+      signature: txid,
+    },
+    "finalized"
+  )
 
   // Log the transaction URL on the Solana Explorer
   console.log(`https://explorer.solana.com/tx/${txid}?cluster=devnet`)
+}
+
+function waitForNewBlock(connection: web3.Connection, targetHeight: number) {
+  console.log(`Waiting for ${targetHeight} new blocks`)
+  return new Promise(async (resolve: any) => {
+    // Get the last valid block height of the blockchain
+    const { lastValidBlockHeight } = await connection.getLatestBlockhash()
+
+    // Set an interval to check for new blocks every 1000ms
+    const intervalId = setInterval(async () => {
+      // Get the new valid block height
+      const { lastValidBlockHeight: newValidBlockHeight } =
+        await connection.getLatestBlockhash()
+      // console.log(newValidBlockHeight)
+
+      // Check if the new valid block height is greater than the target block height
+      if (newValidBlockHeight > lastValidBlockHeight + targetHeight) {
+        // If the target block height is reached, clear the interval and resolve the promise
+        clearInterval(intervalId)
+        resolve()
+      }
+    }, 1000)
+  })
 }
 
 main()
