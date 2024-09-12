@@ -3,7 +3,7 @@ import * as web3 from "@solana/web3.js";
 
 try {
   // Connect to the devnet cluster
-  const connection = new web3.Connection(web3.clusterApiUrl("devnet"));
+  const connection = new web3.Connection(web3.clusterApiUrl("devnet"), "confirmed");
 
   // Initialize the user's keypair
   const user = await initializeKeypair(connection);
@@ -24,7 +24,7 @@ try {
       web3.SystemProgram.transfer({
         fromPubkey: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
         toPubkey: address, // The destination account for the transfer
-        lamports: web3.LAMPORTS_PER_SOL * 0.01, // The amount of lamports to transfer
+        lamports: web3.LAMPORTS_PER_SOL * 0.01, // Transfer 0.01 SOL to each recipient
       })
     );
   }
