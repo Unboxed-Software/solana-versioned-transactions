@@ -1,61 +1,43 @@
-import { initializeKeypair } from "./initializeKeypair"
-import * as web3 from "@solana/web3.js"
+import * as web3 from "@solana/web3.js";
+import { makeKeypairs, getExplorerLink } from "@solana-developers/helpers";
+import { initializeKeypair } from "./initializeKeypair";
+import dotenv from "dotenv";
+dotenv.config();
 
 async function main() {
-  // Connect to the devnet cluster
-  const connection = new web3.Connection(web3.clusterApiUrl("devnet"))
+  // Connect to the local Solana cluster
+  const connection = new web3.Connection(web3.clusterApiUrl("devnet"), "confirmed");
 
-  // Initialize the user's keypair
-  const user = await initializeKeypair(connection)
-  console.log("PublicKey:", user.publicKey.toBase58())
+  // Initialize the keypair from the environment variable or create a new one
+  const payer = await initializeKeypair(connection);
 
-  // Generate 22 addresses
-  const recipients = []
-  for (let i = 0; i < 22; i++) {
-    recipients.push(web3.Keypair.generate().publicKey)
-  }
+  // Generate 22 recipient keypairs using makeKeypairs
+  const recipients = makeKeypairs(22).map(keypair => keypair.publicKey);
 
-  // Create an array of transfer instructions
-  const transferInstructions = []
+  // Create a legacy transaction
+  const transaction = new web3.Transaction();
 
-  // Add a transfer instruction for each address
-  for (const address of recipients) {
-    transferInstructions.push(
+  // Add 22 transfer instructions to the transaction
+  recipients.forEach((recipient) => {
+    transaction.add(
       web3.SystemProgram.transfer({
-        fromPubkey: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
-        toPubkey: address, // The destination account for the transfer
-        lamports: web3.LAMPORTS_PER_SOL * 0.01, // The amount of lamports to transfer
+        fromPubkey: payer.publicKey,
+        toPubkey: recipient,
+        lamports: web3.LAMPORTS_PER_SOL * 0.01, // Transfer 0.01 SOL to each recipient
       })
-    )
+    );
+  });
+
+  // Sign and send the transaction
+  try {
+    const signature = await web3.sendAndConfirmTransaction(connection, transaction, [payer]);
+    console.log(`Transaction successful with signature: ${getExplorerLink('tx', signature, 'devnet')}`);
+  } catch (error) {
+    console.error("Transaction failed:", error);
   }
-
-  // Create a transaction and add the transfer instructions
-  const transaction = new web3.Transaction().add(...transferInstructions)
-
-  // Send the transaction to the cluster (this will fail in this example if addresses > 21)
-  const txid = await connection.sendTransaction(transaction, [user])
-
-  // Get the latest blockhash and last valid block height
-  const { lastValidBlockHeight, blockhash } =
-    await connection.getLatestBlockhash()
-
-  // Confirm the transaction
-  await connection.confirmTransaction({
-    blockhash: blockhash,
-    lastValidBlockHeight: lastValidBlockHeight,
-    signature: txid,
-  })
-
-  // Log the transaction URL on the Solana Explorer
-  console.log(`https://explorer.solana.com/tx/${txid}?cluster=devnet`)
 }
 
-main()
-  .then(() => {
-    console.log("Finished successfully")
-    process.exit(0)
-  })
-  .catch((error) => {
-    console.log(error)
-    process.exit(1)
-  })
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
