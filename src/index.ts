@@ -15,7 +15,7 @@ async function initializeLookupTable(
     web3.AddressLookupTableProgram.createLookupTable({
       authority: user.publicKey, // The authority (i.e., the account with permission to modify the lookup table)
       payer: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
-      recentSlot: slot - 1, // The recent slot to derive lookup table's address
+      recentSlot: slot - 1, // The recent slot to derive the lookup table's address
     });
   console.log("lookup table address:", lookupTableAddress.toBase58());
 
