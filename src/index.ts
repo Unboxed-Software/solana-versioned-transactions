@@ -1,9 +1,17 @@
 import { initializeKeypair } from "./initializeKeypair";
-import * as web3 from "@solana/web3.js";
+import {
+  clusterApiUrl,
+  Keypair,
+  LAMPORTS_PER_SOL,
+  SystemProgram,
+  TransactionMessage,
+  VersionedTransaction,
+  Connection,
+} from "@solana/web3.js";
 
 try {
   // Connect to the devnet cluster
-  const connection = new web3.Connection(web3.clusterApiUrl("devnet"), "confirmed");
+  const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
 
   // Initialize the user's keypair
   const user = await initializeKeypair(connection);
@@ -12,7 +20,7 @@ try {
   // Generate 22 addresses
   const recipients = [];
   for (let i = 0; i < 22; i++) {
-    recipients.push(web3.Keypair.generate().publicKey);
+    recipients.push(Keypair.generate().publicKey);
   }
 
   // Create an array of transfer instructions
@@ -21,10 +29,10 @@ try {
   // Add a transfer instruction for each address
   for (const address of recipients) {
     transferInstructions.push(
-      web3.SystemProgram.transfer({
+      SystemProgram.transfer({
         fromPubkey: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
         toPubkey: address, // The destination account for the transfer
-        lamports: web3.LAMPORTS_PER_SOL * 0.01, // Transfer 0.01 SOL to each recipient
+        lamports: LAMPORTS_PER_SOL * 0.01, // Transfer 0.01 SOL to each recipient
       })
     );
   }
@@ -34,14 +42,14 @@ try {
     await connection.getLatestBlockhash();
 
   // Create the transaction message
-  const message = new web3.TransactionMessage({
+  const message = new TransactionMessage({
     payerKey: user.publicKey, // Public key of the account that will pay for the transaction
     recentBlockhash: blockhash, // Latest blockhash
     instructions: transferInstructions, // Instructions included in transaction
   }).compileToV0Message();
 
   // Create the versioned transaction using the message
-  const transaction = new web3.VersionedTransaction(message);
+  const transaction = new VersionedTransaction(message);
 
   // Sign the transaction
   transaction.sign([user]);
