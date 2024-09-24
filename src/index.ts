@@ -1,18 +1,30 @@
 import { initializeKeypair } from "./initializeKeypair";
-import * as web3 from "@solana/web3.js";
+import {
+  clusterApiUrl,
+  Keypair,
+  LAMPORTS_PER_SOL,
+  SystemProgram,
+  TransactionMessage,
+  VersionedTransaction,
+  Connection,
+  PublicKey,
+  AddressLookupTableProgram,
+  TransactionInstruction,
+  AddressLookupTableAccount
+} from "@solana/web3.js";
 
 async function initializeLookupTable(
-  user: web3.Keypair,
-  connection: web3.Connection,
-  addresses: web3.PublicKey[]
-): Promise<web3.PublicKey> {
+  user: Keypair,
+  connection: Connection,
+  addresses: PublicKey[]
+): Promise<PublicKey> {
   // Get the current slot
   const slot = await connection.getSlot();
 
   // Create an instruction for creating a lookup table
   // and retrieve the address of the new lookup table
   const [lookupTableInst, lookupTableAddress] =
-    web3.AddressLookupTableProgram.createLookupTable({
+    AddressLookupTableProgram.createLookupTable({
       authority: user.publicKey, // The authority (i.e., the account with permission to modify the lookup table)
       payer: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
       recentSlot: slot - 1, // The recent slot to derive the lookup table's address
@@ -20,7 +32,7 @@ async function initializeLookupTable(
   console.log("lookup table address:", lookupTableAddress.toBase58());
 
   // Create an instruction to extend a lookup table with the provided addresses
-  const extendInstruction = web3.AddressLookupTableProgram.extendLookupTable({
+  const extendInstruction = AddressLookupTableProgram.extendLookupTable({
     payer: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
     authority: user.publicKey, // The authority (i.e., the account with permission to modify the lookup table)
     lookupTable: lookupTableAddress, // The address of the lookup table to extend
@@ -37,7 +49,7 @@ async function initializeLookupTable(
   while (remaining.length > 0) {
     const toAdd = remaining.slice(0, 30);
     remaining = remaining.slice(30);
-    const extendInstruction = web3.AddressLookupTableProgram.extendLookupTable({
+    const extendInstruction = AddressLookupTableProgram.extendLookupTable({
       payer: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
       authority: user.publicKey, // The authority (i.e., the account with permission to modify the lookup table)
       lookupTable: lookupTableAddress, // The address of the lookup table to extend
@@ -51,24 +63,24 @@ async function initializeLookupTable(
 }
 
 async function sendV0Transaction(
-  connection: web3.Connection,
-  user: web3.Keypair,
-  instructions: web3.TransactionInstruction[],
-  lookupTableAccounts?: web3.AddressLookupTableAccount[]
+  connection: Connection,
+  user: Keypair,
+  instructions: TransactionInstruction[],
+  lookupTableAccounts?: AddressLookupTableAccount[]
 ) {
   // Get the latest blockhash and last valid block height
   const { lastValidBlockHeight, blockhash } =
     await connection.getLatestBlockhash();
 
   // Create a new transaction message with the provided instructions
-  const messageV0 = new web3.TransactionMessage({
+  const messageV0 = new TransactionMessage({
     payerKey: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
     recentBlockhash: blockhash, // The blockhash of the most recent block
     instructions, // The instructions to include in the transaction
   }).compileToV0Message(lookupTableAccounts ? lookupTableAccounts : undefined);
 
   // Create a new transaction object with the message
-  const transaction = new web3.VersionedTransaction(messageV0);
+  const transaction = new VersionedTransaction(messageV0);
 
   // Sign the transaction with the user's keypair
   transaction.sign([user]);
@@ -90,7 +102,7 @@ async function sendV0Transaction(
   console.log(`https://explorer.solana.com/tx/${txid}?cluster=devnet`);
 }
 
-function waitForNewBlock(connection: web3.Connection, targetHeight: number) {
+function waitForNewBlock(connection: Connection, targetHeight: number) {
   console.log(`Waiting for ${targetHeight} new blocks`);
   return new Promise(async (resolve: any) => {
     // Get the last valid block height of the blockchain
@@ -115,7 +127,7 @@ function waitForNewBlock(connection: web3.Connection, targetHeight: number) {
 
 try {
   // Connect to the devnet cluster
-  const connection = new web3.Connection(web3.clusterApiUrl("devnet"), "confirmed");
+  const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
 
   // Initialize the user's keypair
   const user = await initializeKeypair(connection);
@@ -124,7 +136,7 @@ try {
   // Generate 57 addresses
   const recipients = [];
   for (let i = 0; i < 57; i++) {
-    recipients.push(web3.Keypair.generate().publicKey);
+    recipients.push(Keypair.generate().publicKey);
   }
 
   const lookupTableAddress = await initializeLookupTable(
@@ -144,10 +156,10 @@ try {
   }
 
   const transferInstructions = recipients.map((recipient) => {
-    return web3.SystemProgram.transfer({
+    return SystemProgram.transfer({
       fromPubkey: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
       toPubkey: recipient, // The destination account for the transfer
-      lamports: web3.LAMPORTS_PER_SOL * 0.01, // Transfer 0.01 SOL to each recipient
+      lamports: LAMPORTS_PER_SOL * 0.01, // Transfer 0.01 SOL to each recipient
     });
   });
 
