@@ -1,64 +1,72 @@
-import { initializeKeypair } from "./initializeKeypair"
-import * as web3 from "@solana/web3.js"
+import { initializeKeypair } from "./initializeKeypair";
+import {
+  clusterApiUrl,
+  Keypair,
+  LAMPORTS_PER_SOL,
+  SystemProgram,
+  TransactionMessage,
+  VersionedTransaction,
+  Connection,
+} from "@solana/web3.js";
 
-async function main() {
+try {
   // Connect to the devnet cluster
-  const connection = new web3.Connection(web3.clusterApiUrl("devnet"))
+  const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
 
   // Initialize the user's keypair
-  const user = await initializeKeypair(connection)
-  console.log("PublicKey:", user.publicKey.toBase58())
+  const user = await initializeKeypair(connection);
+  console.log("Public Key:", user.publicKey.toBase58());
 
   // Generate 22 addresses
-  const addresses = []
+  const recipients = [];
   for (let i = 0; i < 22; i++) {
-    addresses.push(web3.Keypair.generate().publicKey)
+    recipients.push(Keypair.generate().publicKey);
   }
-
-  // Get the minimum balance required to be exempt from rent
-  const minRent = await connection.getMinimumBalanceForRentExemption(0)
 
   // Create an array of transfer instructions
-  const transferInstructions = []
+  const transferInstructions = [];
 
   // Add a transfer instruction for each address
-  for (const address of addresses) {
+  for (const address of recipients) {
     transferInstructions.push(
-      web3.SystemProgram.transfer({
+      SystemProgram.transfer({
         fromPubkey: user.publicKey, // The payer (i.e., the account that will pay for the transaction fees)
         toPubkey: address, // The destination account for the transfer
-        lamports: minRent, // The amount of lamports to transfer
+        lamports: LAMPORTS_PER_SOL * 0.01, // Transfer 0.01 SOL to each recipient
       })
-    )
+    );
   }
-
-  // Create a transaction and add the transfer instructions
-  const transaction = new web3.Transaction().add(...transferInstructions)
-
-  // Send the transaction to the cluster (this will fail in this example if addresses > 21)
-  const txid = await connection.sendTransaction(transaction, [user])
 
   // Get the latest blockhash and last valid block height
   const { lastValidBlockHeight, blockhash } =
-    await connection.getLatestBlockhash()
+    await connection.getLatestBlockhash();
+
+  // Create the transaction message
+  const message = new TransactionMessage({
+    payerKey: user.publicKey, // Public key of the account that will pay for the transaction
+    recentBlockhash: blockhash, // Latest blockhash
+    instructions: transferInstructions, // Instructions included in transaction
+  }).compileToV0Message();
+
+  // Create the versioned transaction using the message
+  const transaction = new VersionedTransaction(message);
+
+  // Sign the transaction
+  transaction.sign([user]);
+
+  // Send the transaction to the cluster (this will fail in this example if addresses > 21)
+  const txid = await connection.sendTransaction(transaction);
 
   // Confirm the transaction
   await connection.confirmTransaction({
     blockhash: blockhash,
     lastValidBlockHeight: lastValidBlockHeight,
     signature: txid,
-  })
+  });
 
   // Log the transaction URL on the Solana Explorer
-  console.log(`https://explorer.solana.com/tx/${txid}?cluster=devnet`)
+  console.log(`https://explorer.solana.com/tx/${txid}?cluster=devnet`);
+  console.log("Finished successfully");
+} catch (error) {
+  console.log(error);
 }
-
-main()
-  .then(() => {
-    console.log("Finished successfully")
-    process.exit(0)
-  })
-  .catch((error) => {
-    console.log(error)
-    process.exit(1)
-  })

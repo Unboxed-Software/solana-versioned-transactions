@@ -1,1 +1,5 @@
-# solana-npx-client-template
+# solana-versioned-transactions
+
+This repository contains a set of tools for creating and verifying versioned transactions on the Solana blockchain.
+
+> **Note**: This project uses `esrun` for running scripts. You can install it globally by running `npm install -g esrun`.
